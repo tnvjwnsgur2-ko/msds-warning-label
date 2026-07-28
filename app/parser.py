@@ -1,4 +1,4 @@
-﻿import re
+import re
 from io import BytesIO
 from pathlib import Path
 from typing import Dict, List
@@ -76,6 +76,125 @@ def _extract_precaution_sections(text: str) -> Dict[str, List[str]]:
             sections["예방"].append(phrase_text)
 
     return sections
+
+
+def _extract_numbered_section(text: str, section_number: int) -> List[str]:
+    lines = [line.strip() for line in text.replace("\r\n", "\n").splitlines()]
+    start_pattern = re.compile(rf"^\s*{section_number}\s*\.\s*")
+    next_pattern = re.compile(r"^\s*\d{1,2}\s*\.\s+[가-힣]")
+    section_lines: List[str] = []
+    collecting = False
+
+    for line in lines:
+        if not line:
+            continue
+        if start_pattern.match(line):
+            collecting = True
+            section_lines.append(_clean_value(start_pattern.sub("", line)))
+            continue
+        if collecting and next_pattern.match(line):
+            break
+        if collecting:
+            section_lines.append(_clean_value(line))
+
+    return _dedupe_lines([line for line in section_lines if line])
+
+
+def _extract_protective_equipment(section_lines: List[str]) -> List[str]:
+    if not section_lines:
+        return []
+
+    start_index = -1
+    for index, line in enumerate(section_lines):
+        compact = re.sub(r"\s+", "", line)
+        if compact.startswith("다.") and ("개인보호구" in compact or "개인보호장비" in compact):
+            start_index = index
+            break
+        if compact.startswith("다") and ("개인보호구" in compact or "개인보호장비" in compact):
+            start_index = index
+            break
+
+    if start_index < 0:
+        for index, line in enumerate(section_lines):
+            compact = re.sub(r"\s+", "", line)
+            if "개인보호구" in compact or "개인보호장비" in compact:
+                start_index = index
+                break
+
+    if start_index < 0:
+        return []
+
+    return _extract_subsection_lines(section_lines[start_index:])
+
+
+def _extract_hazard_classification(section_lines: List[str]) -> List[str]:
+    if not section_lines:
+        return []
+
+    start_index = -1
+    for index, line in enumerate(section_lines):
+        compact = re.sub(r"\s+", "", line)
+        compact_key = re.sub(r"[\s·ㆍ.]+", "", line)
+        if compact.startswith("가.") and "유해성위험성분류" in compact_key:
+            start_index = index
+            break
+        if "유해성위험성분류" in compact_key:
+            start_index = index
+            break
+
+    if start_index < 0:
+        return section_lines
+
+    return _extract_subsection_lines(section_lines[start_index:])
+
+
+def _extract_management_hazard_classification(text: str, section_lines: List[str]) -> List[str]:
+    classification = _extract_hazard_classification(section_lines)
+    if len(classification) > 1:
+        return classification
+
+    leading_lines: List[str] = []
+    for line in text.replace("\r\n", "\n").splitlines():
+        clean_line = line.strip()
+        if not clean_line:
+            continue
+        if "○ 그림문자" in clean_line or "○ 신호어" in clean_line:
+            break
+        if clean_line.startswith("-"):
+            leading_lines.append(clean_line)
+
+    if leading_lines:
+        return _dedupe_lines(classification + leading_lines)
+    return classification
+
+
+def _extract_subsection_lines(lines: List[str]) -> List[str]:
+    selected: List[str] = []
+    first_line = True
+    subsection_pattern = re.compile(r"^[가-힣]\.\s*")
+
+    for line in lines:
+        if not first_line and subsection_pattern.match(line):
+            break
+        selected.append(line)
+        first_line = False
+
+    return _dedupe_lines(selected)
+
+
+def _dedupe_lines(lines: List[str]) -> List[str]:
+    clean_lines: List[str] = []
+    seen = set()
+    skip_prefixes = ("자료없음", "해당없음", "해당 없음")
+    for line in lines:
+        clean_line = _clean_value(line)
+        if not clean_line or clean_line in seen:
+            continue
+        if clean_line.startswith(skip_prefixes):
+            continue
+        clean_lines.append(clean_line)
+        seen.add(clean_line)
+    return clean_lines
 
 
 def _collect_pictograms_from_text(normalized_text: str) -> List[str]:
@@ -274,6 +393,10 @@ def extract_fields(text: str, file_path: str | None = None) -> Dict[str, object]
     hazard_phrases = _extract_hazard_phrases(normalized)
     precaution_sections = _extract_precaution_sections(normalized)
     precaution_statements = [statement for values in precaution_sections.values() for statement in values]
+    hazard_section = _extract_numbered_section(normalized, 2)
+    first_aid_section = _extract_numbered_section(normalized, 4)
+    handling_section = _extract_numbered_section(normalized, 7)
+    exposure_section = _extract_numbered_section(normalized, 8)
 
     pictograms = match_pictograms_from_pdf(file_path) if file_path else []
     if not pictograms:
@@ -293,6 +416,13 @@ def extract_fields(text: str, file_path: str | None = None) -> Dict[str, object]
             "company_name": company_name,
             "address": address,
             "emergency_phone": emergency,
+        },
+        "management": {
+            "product_name": product_name,
+            "hazard_risk": _extract_management_hazard_classification(normalized, hazard_section),
+            "handling_precautions": handling_section or precaution_sections.get("예방", []),
+            "protective_equipment": _extract_protective_equipment(exposure_section),
+            "first_aid": first_aid_section,
         },
     }
 
