@@ -183,15 +183,15 @@ def _attach_pictogram_images(result: dict) -> dict:
     return result
 
 
-def _safe_download_name(results: List[dict]) -> str:
+def _safe_download_name(results: List[dict], document_label: str = "경고표지") -> str:
     if not results:
-        return "경고표지.pdf"
+        return f"{document_label}.pdf"
 
     first_name = Path(str(results[0].get("filename") or "MSDS")).stem
     first_name = re.sub(r'[\\/:*?"<>|]+', "_", first_name).strip() or "MSDS"
     if len(results) == 1:
-        return f"경고표지_{first_name}.pdf"
-    return f"경고표지_{first_name}_외{len(results) - 1}건.pdf"
+        return f"{document_label}_{first_name}.pdf"
+    return f"{document_label}_{first_name}_외{len(results) - 1}건.pdf"
 
 
 def _content_disposition(filename: str) -> str:
@@ -366,6 +366,37 @@ def _draw_warning_label_pdf(pdf: canvas.Canvas, result: dict, regular_font: str,
     _draw_section(pdf, "공급자 정보", [line for line in supplier_lines if line], margin + 12, y, content_width - 24, regular_font, bold_font, bottom)
 
 
+def _draw_management_pdf(pdf: canvas.Canvas, result: dict, regular_font: str, bold_font: str) -> None:
+    width, height = A4
+    margin = 42
+    bottom = 42
+    content_width = width - margin * 2
+    y = height - margin
+    management = result.get("management") or {}
+
+    pdf.setFont(bold_font, 18)
+    pdf.drawCentredString(width / 2, y, "MSDS 관리요령")
+    y -= 28
+
+    product_name = str(management.get("product_name") or result.get("product_name") or result.get("filename") or "제품명")
+    pdf.setFont(bold_font, 14)
+    product_lines = _wrap_text(f"제품명: {product_name}", bold_font, 14, content_width)
+    for line in product_lines[:3]:
+        pdf.drawString(margin, y, line)
+        y -= 18
+    y -= 8
+
+    sections = [
+        ("유해성·위험성", management.get("hazard_risk") or []),
+        ("취급주의사항", management.get("handling_precautions") or []),
+        ("적절한 보호구", management.get("protective_equipment") or []),
+        ("응급조치 요령", management.get("first_aid") or []),
+    ]
+
+    for title, lines in sections:
+        y = _draw_section(pdf, title, lines, margin, y, content_width, regular_font, bold_font, bottom)
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     return templates.TemplateResponse(request=request, name="index.html", context={})
@@ -421,6 +452,31 @@ def download_pdf(payload: ExtractRequest):
     pdf.save()
     buffer.seek(0)
     filename = _safe_download_name(payload.results)
+
+    return StreamingResponse(
+        buffer,
+        media_type="application/pdf",
+        headers={"Content-Disposition": _content_disposition(filename)},
+    )
+
+
+@app.post("/download-management-pdf")
+def download_management_pdf(payload: ExtractRequest):
+    if len(payload.results) > MAX_UPLOAD_FILES:
+        raise HTTPException(status_code=413, detail=f"한 번에 최대 {MAX_UPLOAD_FILES}개 결과만 저장할 수 있습니다.")
+
+    buffer = BytesIO()
+    regular_font, bold_font = _register_pdf_fonts()
+    pdf = canvas.Canvas(buffer, pagesize=A4)
+
+    for index, result in enumerate(payload.results):
+        if index:
+            pdf.showPage()
+        _draw_management_pdf(pdf, result, regular_font, bold_font)
+
+    pdf.save()
+    buffer.seek(0)
+    filename = _safe_download_name(payload.results, "관리요령")
 
     return StreamingResponse(
         buffer,
