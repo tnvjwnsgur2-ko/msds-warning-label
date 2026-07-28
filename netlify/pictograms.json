@@ -1,0 +1,40 @@
+﻿{
+    "options":  [
+                    {
+                        "label":  "폭발성",
+                        "url":  "/ghs-pictograms/1.%ED%8F%AD%EB%B0%9C%EC%84%B1_%EC%9E%90%EA%B8%B0%EB%B0%98%EC%9D%91%EC%84%B1_%EC%9C%A0%EA%B8%B0%EA%B3%BC%EC%82%B0%ED%99%94%EB%AC%BC.gif"
+                    },
+                    {
+                        "label":  "인화성",
+                        "url":  "/ghs-pictograms/2.%EC%9D%B8%ED%99%94%EC%84%B1_%EB%AC%BC%EB%B0%98%EC%9D%91%EC%84%B1_%EC%9E%90%EA%B8%B0%EB%B0%98%EC%9D%91%EC%84%B1_%EC%9E%90%EC%97%B0%EB%B0%9C%ED%99%94%EC%84%B1_%EC%9E%90%EA%B8%B0%EB%B0%9C%EC%97%B4%EC%84%B1_%EC%9C%A0%EA%B8%B0%EA%B3%BC%EC%82%B0%ED%99%94%EB%AC%BC.gif"
+                    },
+                    {
+                        "label":  "급성독성",
+                        "url":  "/ghs-pictograms/3.%EA%B8%89%EC%84%B1%EB%8F%85%EC%84%B1.gif"
+                    },
+                    {
+                        "label":  "건강유해성",
+                        "url":  "/ghs-pictograms/4.%ED%98%B8%ED%9D%A1%EA%B8%B0%EA%B3%BC%EB%AF%BC%EC%84%B1_%EB%B0%9C%EC%95%94%EC%84%B1_%EC%83%9D%EC%8B%9D%EC%84%B8%ED%8F%AC%EB%B3%80%EC%9D%B4%EC%9B%90%EC%84%B1_%EC%83%9D%EC%8B%9D%EB%8F%85%EC%84%B1_%ED%8A%B9%EC%A0%95%ED%91%9C%EC%A0%81%EC%9E%A5%EA%B8%B0%EB%8F%85%EC%84%B1.gif"
+                    },
+                    {
+                        "label":  "수생환경유해성",
+                        "url":  "/ghs-pictograms/5.%EC%88%98%EC%83%9D%ED%99%98%EA%B2%BD%EC%9C%A0%ED%95%B4%EC%84%B1.gif"
+                    },
+                    {
+                        "label":  "산화성",
+                        "url":  "/ghs-pictograms/6.%EC%82%B0%ED%99%94%EC%84%B1.gif"
+                    },
+                    {
+                        "label":  "고압가스",
+                        "url":  "/ghs-pictograms/7.%EA%B3%A0%EC%95%95%EA%B0%80%EC%8A%A4.gif"
+                    },
+                    {
+                        "label":  "부식성",
+                        "url":  "/ghs-pictograms/8.%EA%B8%88%EC%86%8D%EB%B6%80%EC%8B%9D%EC%84%B1_%ED%94%BC%EB%B6%80%EB%B6%80%EC%8B%9D%EC%84%B1_%EC%8B%AC%ED%95%9C%EB%88%88%EC%86%90%EC%83%81%EC%84%B1.gif"
+                    },
+                    {
+                        "label":  "경고",
+                        "url":  "/ghs-pictograms/9.%EA%B2%BD%EA%B3%A0.gif"
+                    }
+                ]
+}

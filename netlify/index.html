@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MSDS 경고표지 데모</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 2rem; background: #f7f8fb; color: #222; }
+      .wrap { max-width: 1180px; margin: 0 auto; background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 6px 24px rgba(0,0,0,0.08); }
+      h1 { margin-top: 0; }
+      form { display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1.5rem; }
+      input[type="file"] { border: 1px solid #ddd; padding: 0.6rem; border-radius: 8px; }
+      button { padding: 0.7rem 1rem; border: 0; border-radius: 8px; cursor: pointer; background: #2563eb; color: white; font-weight: bold; }
+      input[type="text"], textarea, select { width: 100%; box-sizing: border-box; border: 1px solid #d1d5db; border-radius: 8px; padding: 0.55rem 0.65rem; font: inherit; background: #fff; }
+      textarea { min-height: 96px; resize: vertical; line-height: 1.45; }
+      .actions { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+      .card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 1rem; margin-bottom: 1rem; }
+      .muted { color: #666; }
+      .notice { margin: 0 0 1rem; padding: 0.75rem 0.9rem; border: 1px solid #bfdbfe; border-radius: 8px; background: #eff6ff; color: #1e3a8a; font-size: 0.92rem; line-height: 1.45; }
+      .grid { display: grid; gap: 1rem; }
+      .field { margin-bottom: 0.85rem; }
+      .label { display: block; font-weight: bold; color: #374151; margin-bottom: 0.35rem; }
+      .two-col { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.85rem; }
+      .workbench { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(360px, 0.95fr); gap: 1rem; align-items: start; }
+      .editor-panel, .preview-panel { min-width: 0; }
+      .pictogram-list { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 0.5rem; }
+      .pictogram-item { width: 86px; margin: 0; text-align: center; border: 1px solid #e5e7eb; border-radius: 8px; padding: 0.45rem; cursor: pointer; background: #fff; }
+      .pictogram-item input { margin-bottom: 0.25rem; }
+      .pictogram-item img { width: 54px; height: 54px; object-fit: contain; display: block; margin: 0 auto 0.3rem; }
+      .pictogram-item span { font-size: 0.8rem; color: #374151; line-height: 1.2; }
+      .pictogram-item:has(input:checked) { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37,99,235,0.15); }
+      .warning-label { border: 2px solid #111827; background: #fff; color: #111827; }
+      .warning-label h4 { margin: 0; padding: 0.7rem 0.85rem; font-size: 1.35rem; line-height: 1.25; text-align: center; border-bottom: 2px solid #111827; }
+      .warning-body { padding: 0.9rem; }
+      .signal-word { text-align: center; font-size: 1.25rem; font-weight: 800; margin-bottom: 0.8rem; }
+      .preview-pictograms { display: flex; justify-content: center; gap: 0.55rem; flex-wrap: wrap; margin-bottom: 0.9rem; }
+      .preview-pictograms img { width: 72px; height: 72px; object-fit: contain; }
+      .preview-section { border-top: 1px solid #d1d5db; padding-top: 0.65rem; margin-top: 0.65rem; }
+      .preview-section strong { display: block; margin-bottom: 0.35rem; }
+      .preview-section ul { margin: 0; padding-left: 1.2rem; }
+      .preview-section li { margin-bottom: 0.25rem; line-height: 1.35; }
+      .preview-note { margin-top: 0.35rem; font-size: 0.82rem; color: #6b7280; }
+      .supplier-box { font-size: 0.92rem; line-height: 1.4; }
+      @media (max-width: 980px) { .workbench { grid-template-columns: 1fr; } }
+      @media (max-width: 720px) { body { margin: 1rem; } .wrap { padding: 1rem; } .two-col { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>MSDS 경고표지 자동 추출 데모</h1>
+      <p class="muted">PDF를 업로드하면 추출 결과를 먼저 채우고, 필요한 항목은 직접 수정할 수 있습니다.</p>
+      <div class="notice">업로드한 PDF는 경고표지 생성에만 사용되며 서버에 보관하지 않습니다. Netlify 화면은 별도 FastAPI 백엔드로 PDF 처리를 요청합니다.</div>
+
+      <form id="upload-form">
+        <input id="files" type="file" name="files" multiple accept="application/pdf" />
+        <div class="actions">
+          <button type="submit">추출하기</button>
+          <button type="button" id="download-btn" style="background:#16a34a;">PDF로 저장</button>
+          <button type="button" id="print-btn" style="background:#7c3aed;">인쇄</button>
+          <button type="button" id="reset-btn" style="background:#dc2626; display:none;">처음으로 돌아가기</button>
+        </div>
+      </form>
+
+      <div id="status" class="muted">업로드할 PDF를 선택한 뒤 추출을 눌러주세요.</div>
+      <div id="result" class="grid"></div>
+    </div>
+
+    <script src="/config.js"></script>
+    <script>
+      let lastResults = [];
+      let pictogramOptions = [];
+      const API_BASE_URL = (window.MSDS_API_BASE_URL || "").replace(/\/$/, "");
+      const form = document.getElementById('upload-form');
+      const resultDiv = document.getElementById('result');
+      const statusDiv = document.getElementById('status');
+
+      loadPictogramOptions();
+
+      async function loadPictogramOptions() {
+        try {
+          const response = await fetch('/pictograms.json');
+          const data = await response.json();
+          pictogramOptions = data.options || [];
+        } catch (error) {
+          console.error(error);
+        }
+      }
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const input = document.getElementById('files');
+        const formData = new FormData();
+        Array.from(input.files).forEach((file) => formData.append('files', file));
+
+        statusDiv.textContent = '처리 중입니다...';
+        try {
+          const response = await fetch(apiUrl('/extract'), { method: 'POST', body: formData });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.detail || '처리할 수 없는 파일입니다.');
+          lastResults = data.results || [];
+          renderResults(lastResults);
+          statusDiv.textContent = `${lastResults.length}개 파일 처리 완료`;
+        } catch (error) {
+          statusDiv.textContent = error.message || '오류가 발생했습니다.';
+          console.error(error);
+        }
+      });
+
+      document.getElementById('download-btn').addEventListener('click', async () => {
+        if (!lastResults.length) return;
+        const response = await fetch(apiUrl('/download-pdf'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ results: lastResults })
+        });
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          statusDiv.textContent = data.detail || 'PDF 저장 중 오류가 발생했습니다.';
+          return;
+        }
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = getDownloadFilename(response) || getLocalDownloadFilename();
+        link.click();
+        URL.revokeObjectURL(url);
+      });
+
+      document.getElementById('print-btn').addEventListener('click', () => window.print());
+
+      document.getElementById('reset-btn').addEventListener('click', () => {
+        resultDiv.innerHTML = '';
+        statusDiv.textContent = '업로드할 PDF를 선택한 뒤 추출을 눌러주세요.';
+        document.getElementById('files').value = '';
+        document.getElementById('reset-btn').style.display = 'none';
+        lastResults = [];
+      });
+
+      function apiUrl(path) {
+        return `${API_BASE_URL}${path}`;
+      }
+
+      function getDownloadFilename(response) {
+        const header = response.headers.get('Content-Disposition') || '';
+        const utf8Match = header.match(/filename\*=UTF-8''([^;]+)/i);
+        if (utf8Match) return decodeURIComponent(utf8Match[1]);
+        const asciiMatch = header.match(/filename="?([^";]+)"?/i);
+        return asciiMatch ? asciiMatch[1] : '';
+      }
+
+      function getLocalDownloadFilename() {
+        if (!lastResults.length) return '경고표지.pdf';
+        const firstName = String(lastResults[0].filename || 'MSDS').replace(/\.pdf$/i, '').replace(/[\\/:*?"<>|]+/g, '_');
+        return lastResults.length === 1 ? `경고표지_${firstName}.pdf` : `경고표지_${firstName}_외${lastResults.length - 1}건.pdf`;
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+          '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        })[char]);
+      }
+
+      function splitLines(value) {
+        return String(value || '').split('\n').map((line) => line.trim()).filter(Boolean);
+      }
+
+      function joinLines(value) {
+        return Array.isArray(value) ? value.join('\n') : '';
+      }
+
+      function refreshPictogramImages(item) {
+        item.pictogram_images = item.pictograms.map((label) => {
+          const option = pictogramOptions.find((entry) => entry.label === label);
+          return option ? { label, url: option.url } : null;
+        }).filter(Boolean);
+      }
+
+      function renderPictogramEditor(item, index) {
+        const selected = new Set(item.pictograms || []);
+        return `<div class="pictogram-list">${pictogramOptions.map((entry) => `
+          <label class="pictogram-item">
+            <input type="checkbox" data-index="${index}" data-field="pictograms" value="${escapeHtml(entry.label)}" ${selected.has(entry.label) ? 'checked' : ''} />
+            <img src="${escapeHtml(entry.url)}" alt="${escapeHtml(entry.label)}" />
+            <span>${escapeHtml(entry.label)}</span>
+          </label>
+        `).join('')}</div>`;
+      }
+
+      function renderPreview(item) {
+        const supplier = item.supplier || {};
+        const hazardList = item.hazard_phrases || [];
+        const precautions = item.precaution_sections || {};
+        const precautionGroups = [
+          ['예방', precautions['예방'] || []],
+          ['대응', precautions['대응'] || []],
+          ['저장', precautions['저장'] || []],
+          ['폐기', precautions['폐기'] || []]
+        ].filter(([, entries]) => entries.length);
+        const pictograms = (item.pictogram_images || []).map((entry) => `
+          <img src="${escapeHtml(entry.url)}" alt="${escapeHtml(entry.label)}" title="${escapeHtml(entry.label)}" />
+        `).join('');
+
+        return `
+          <div class="warning-label">
+            <h4>${escapeHtml(item.product_name || '제품명')}</h4>
+            <div class="warning-body">
+              <div class="preview-pictograms">${pictograms}</div>
+              <div class="signal-word">${escapeHtml(item.signal_word || '')}</div>
+              <div class="preview-section">
+                <strong>유해·위험 문구</strong>
+                <ul>${hazardList.map((entry) => `<li>${escapeHtml(entry)}</li>`).join('')}</ul>
+              </div>
+              <div class="preview-section">
+                <strong>예방조치 문구</strong>
+                ${precautionGroups.map(([groupName, entries]) => `
+                  <div class="preview-note">${escapeHtml(groupName)}</div>
+                  <ul>${entries.map((entry) => `<li>${escapeHtml(entry)}</li>`).join('')}</ul>
+                `).join('')}
+              </div>
+              <div class="preview-section supplier-box">
+                <strong>공급자 정보</strong>
+                <div>${escapeHtml(supplier.company_name || '')}</div>
+                <div>${escapeHtml(supplier.address || '')}</div>
+                <div>${escapeHtml(supplier.emergency_phone || '')}</div>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      function updatePrecautionStatements(item) {
+        item.precaution_statements = Object.values(item.precaution_sections || {}).flat();
+      }
+
+      function updatePreview(index) {
+        const target = resultDiv.querySelector(`[data-preview-index="${index}"]`);
+        if (target) target.innerHTML = renderPreview(lastResults[index]);
+      }
+
+      function bindEditors() {
+        resultDiv.querySelectorAll('input[type="text"], textarea, select').forEach((element) => {
+          element.addEventListener('input', handleEdit);
+          element.addEventListener('change', handleEdit);
+        });
+        resultDiv.querySelectorAll('input[type="checkbox"][data-field="pictograms"]').forEach((element) => {
+          element.addEventListener('change', handlePictogramEdit);
+        });
+      }
+
+      function handleEdit(event) {
+        const element = event.currentTarget;
+        const index = Number(element.dataset.index);
+        const item = lastResults[index];
+        const field = element.dataset.field;
+        if (!item || !field) return;
+
+        if (field.startsWith('supplier.')) {
+          const key = field.split('.')[1];
+          item.supplier = item.supplier || {};
+          item.supplier[key] = element.value;
+          updatePreview(index);
+          return;
+        }
+
+        if (field.startsWith('precaution_sections.')) {
+          const key = field.split('.')[1];
+          item.precaution_sections = item.precaution_sections || {};
+          item.precaution_sections[key] = splitLines(element.value);
+          updatePrecautionStatements(item);
+          updatePreview(index);
+          return;
+        }
+
+        if (field === 'hazard_phrases') {
+          item.hazard_phrases = splitLines(element.value);
+          updatePreview(index);
+          return;
+        }
+
+        item[field] = element.value;
+        updatePreview(index);
+      }
+
+      function handlePictogramEdit(event) {
+        const element = event.currentTarget;
+        const index = Number(element.dataset.index);
+        const item = lastResults[index];
+        if (!item) return;
+        const checked = [...resultDiv.querySelectorAll(`input[data-index="${index}"][data-field="pictograms"]:checked`)];
+        item.pictograms = checked.map((input) => input.value);
+        refreshPictogramImages(item);
+        updatePreview(index);
+      }
+
+      function renderResults(results) {
+        resultDiv.innerHTML = '';
+        document.getElementById('reset-btn').style.display = 'inline-block';
+        results.forEach((item, index) => {
+          const card = document.createElement('div');
+          card.className = 'card';
+          const supplier = item.supplier || {};
+          const sections = item.precaution_sections || {};
+
+          card.innerHTML = `
+            <h3>${escapeHtml(item.filename || '파일')}</h3>
+            <div class="workbench">
+              <div class="editor-panel">
+                <div class="two-col">
+                  <label class="field"><span class="label">제품명</span><input type="text" data-index="${index}" data-field="product_name" value="${escapeHtml(item.product_name || '')}" /></label>
+                  <label class="field"><span class="label">신호어</span><select data-index="${index}" data-field="signal_word"><option value="위험" ${item.signal_word === '위험' ? 'selected' : ''}>위험</option><option value="경고" ${item.signal_word === '경고' ? 'selected' : ''}>경고</option><option value="" ${!item.signal_word ? 'selected' : ''}>없음</option></select></label>
+                </div>
+                <div class="field"><span class="label">그림문자</span>${renderPictogramEditor(item, index)}</div>
+                <label class="field"><span class="label">유해·위험 문구</span><textarea data-index="${index}" data-field="hazard_phrases">${escapeHtml(joinLines(item.hazard_phrases))}</textarea></label>
+                <div class="two-col">
+                  <label class="field"><span class="label">예방</span><textarea data-index="${index}" data-field="precaution_sections.예방">${escapeHtml(joinLines(sections['예방']))}</textarea></label>
+                  <label class="field"><span class="label">대응</span><textarea data-index="${index}" data-field="precaution_sections.대응">${escapeHtml(joinLines(sections['대응']))}</textarea></label>
+                  <label class="field"><span class="label">저장</span><textarea data-index="${index}" data-field="precaution_sections.저장">${escapeHtml(joinLines(sections['저장']))}</textarea></label>
+                  <label class="field"><span class="label">폐기</span><textarea data-index="${index}" data-field="precaution_sections.폐기">${escapeHtml(joinLines(sections['폐기']))}</textarea></label>
+                </div>
+                <div class="two-col">
+                  <label class="field"><span class="label">공급자명</span><input type="text" data-index="${index}" data-field="supplier.company_name" value="${escapeHtml(supplier.company_name || '')}" /></label>
+                  <label class="field"><span class="label">긴급 전화번호</span><input type="text" data-index="${index}" data-field="supplier.emergency_phone" value="${escapeHtml(supplier.emergency_phone || '')}" /></label>
+                </div>
+                <label class="field"><span class="label">주소</span><input type="text" data-index="${index}" data-field="supplier.address" value="${escapeHtml(supplier.address || '')}" /></label>
+              </div>
+              <div class="preview-panel" data-preview-index="${index}">${renderPreview(item)}</div>
+            </div>
+          `;
+          resultDiv.appendChild(card);
+        });
+        bindEditors();
+      }
+    </script>
+  </body>
+</html>
+
+
+
