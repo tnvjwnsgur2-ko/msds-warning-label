@@ -1,4 +1,4 @@
-﻿import os
+import os
 import re
 import tempfile
 import time
@@ -316,9 +316,6 @@ def _draw_warning_label_pdf(pdf: canvas.Canvas, result: dict, regular_font: str,
     content_width = width - margin * 2
     y = height - margin
 
-    pdf.setLineWidth(1.4)
-    pdf.rect(margin, bottom, content_width, height - margin - bottom)
-
     product_name = str(result.get("product_name") or result.get("filename") or "제품명")
     pdf.setFont(bold_font, 17)
     title_lines = _wrap_text(product_name, bold_font, 17, content_width - 24)
@@ -326,7 +323,6 @@ def _draw_warning_label_pdf(pdf: canvas.Canvas, result: dict, regular_font: str,
         pdf.drawCentredString(width / 2, y, line)
         y -= 22
     y -= 4
-    pdf.line(margin, y, width - margin, y)
     y -= 22
 
     pictograms = result.get("pictograms", []) or []
