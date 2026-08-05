@@ -262,6 +262,9 @@ function buildFormData() {
 }
 
 async function readError(response) {
+  if (response.status === 504) {
+    return 'PDF 처리 시간이 길어 서버 응답이 지연됐습니다. 잠시 후 다시 시도하거나 파일 수를 줄여주세요.';
+  }
   try {
     const data = await response.json();
     return data.detail || data.error || `요청 실패 (${response.status})`;
