@@ -56,14 +56,17 @@ def test_ui_is_not_cached_and_uses_one_work_name_input_per_management_card():
     assert "app.js?v=20260805-4" in page
 
 
-def test_netlify_frontend_uses_configured_backend_origin():
+def test_netlify_frontend_uses_same_origin_api_proxy():
     project_dir = webapp.BASE_DIR.parent
     page = (project_dir / "netlify" / "index.html").read_text(encoding="utf-8")
     script = (project_dir / "netlify" / "app.js").read_text(encoding="utf-8")
+    config = (project_dir / "netlify" / "config.js").read_text(encoding="utf-8")
 
-    assert 'config.js?v=20260805-4' in page
+    assert 'config.js?v=20260805-5' in page
+    assert 'window.MSDS_API_BASE_URL = ""' in config
     assert "window.MSDS_API_BASE_URL" in script
     assert "fetch(apiUrl('/api/pictograms'))" in script
+    assert "image.src = apiUrl(asset.url)" in script
     assert "fetch(apiUrl(config.endpoint)" in script
     assert "fetch(apiUrl(config.saveEndpoint)" in script
     assert "anchor.href = apiUrl(saved.download_url)" in script
