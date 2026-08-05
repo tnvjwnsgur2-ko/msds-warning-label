@@ -66,18 +66,19 @@ def test_ui_is_not_cached_and_uses_one_work_name_input_per_management_card():
     assert '>PDF 저장</button>' in page
     assert "관리요령 작업명 (파일별 필수)" in script
     assert "workNamesByFile.set(fileKey(file), workNameInput.value)" in script
-    assert "app.js?v=20260805-4" in page
+    assert "app.js?v=20260805-5" in page
 
 
-def test_netlify_frontend_uses_same_origin_api_proxy():
+def test_netlify_frontend_calls_render_directly_to_avoid_proxy_timeout():
     project_dir = webapp.BASE_DIR.parent
     page = (project_dir / "netlify" / "index.html").read_text(encoding="utf-8")
     script = (project_dir / "netlify" / "app.js").read_text(encoding="utf-8")
     config = (project_dir / "netlify" / "config.js").read_text(encoding="utf-8")
 
-    assert 'config.js?v=20260805-5' in page
-    assert 'window.MSDS_API_BASE_URL = ""' in config
+    assert 'config.js?v=20260805-6' in page
+    assert 'window.MSDS_API_BASE_URL = "https://msds-warning-label-api.onrender.com"' in config
     assert "window.MSDS_API_BASE_URL" in script
+    assert "PDF 처리 시간이 길어 서버 응답이 지연됐습니다" in script
     assert "fetch(apiUrl('/api/pictograms'))" in script
     assert "image.src = apiUrl(asset.url)" in script
     assert "fetch(apiUrl(config.endpoint)" in script
