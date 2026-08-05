@@ -6,14 +6,14 @@
     healthCheckPath: /health
     envVars:
       - key: MAX_UPLOAD_BYTES
-        value: 20971520
+        value: 26214400
       - key: MAX_UPLOAD_FILES
-        value: 5
-      - key: MAX_PDF_PAGES
-        value: 50
+        value: 10
       - key: RATE_LIMIT_REQUESTS
         value: 30
       - key: RATE_LIMIT_WINDOW_SECONDS
         value: 60
       - key: ALLOWED_ORIGINS
         value: http://localhost:8000,http://127.0.0.1:8000
+      - key: ALLOWED_ORIGIN_REGEX
+        value: https://.*\.netlify\.app
