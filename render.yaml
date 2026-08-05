@@ -14,6 +14,6 @@
       - key: RATE_LIMIT_WINDOW_SECONDS
         value: 60
       - key: ALLOWED_ORIGINS
-        value: http://localhost:8000,http://127.0.0.1:8000
+        value: http://localhost:8000,http://127.0.0.1:8000,https://subtle-jalebi-51af67.netlify.app
       - key: ALLOWED_ORIGIN_REGEX
-        value: https://.*\.netlify\.app
+        value: https://(?:[a-z0-9-]+--)?subtle-jalebi-51af67\.netlify\.app
