@@ -1,6 +1,12 @@
 [build]
   publish = "netlify"
 
+[[redirects]]
+  from = "/api/*"
+  to = "https://msds-warning-label-api.onrender.com/api/:splat"
+  status = 200
+  force = true
+
 [[headers]]
   for = "/*"
   [headers.values]
