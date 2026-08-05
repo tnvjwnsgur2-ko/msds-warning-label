@@ -1,3 +1,2 @@
-﻿// Netlify에 올린 뒤 FastAPI 백엔드 공개 주소로 바꾸세요.
-// 예: window.MSDS_API_BASE_URL = "https://msds-api.onrender.com";
-window.MSDS_API_BASE_URL = "https://msds-warning-label-api.onrender.com";
+﻿// Netlify의 /api/* 프록시를 사용해 이미지와 API를 같은 출처에서 제공합니다.
+window.MSDS_API_BASE_URL = "";
