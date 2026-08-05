@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import re
 import tempfile
@@ -14,6 +13,11 @@ from fastapi import Body, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.utils import ImageReader
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont, TTFError
+from reportlab.pdfgen import canvas
 
 from app.module_service import (
     pictogram_catalog,
@@ -34,6 +38,18 @@ MAX_FILE_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(25 * 1024 * 1024)))
 RATE_LIMIT_REQUESTS = int(os.getenv("RATE_LIMIT_REQUESTS", "30"))
 RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
 REQUEST_HISTORY: dict[str, deque[float]] = defaultdict(deque)
+FONT_REGULAR_CANDIDATES = (
+    Path("/usr/share/fonts/truetype/nanum/NanumGothic.ttf"),
+    Path("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"),
+    Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+    Path(r"C:\Windows\Fonts\malgun.ttf"),
+)
+FONT_BOLD_CANDIDATES = (
+    Path("/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf"),
+    Path("/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc"),
+    Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"),
+    Path(r"C:\Windows\Fonts\malgunbd.ttf"),
+)
 
 app = FastAPI(title="MSDS 문서 생성", version="2.2.0")
 allowed_origins = [item.strip() for item in os.getenv("ALLOWED_ORIGINS", "").split(",") if item.strip()]
@@ -210,25 +226,184 @@ async def create_management_guides(files: list[UploadFile] = File(...)) -> dict[
     )
 
 
-def _save_json(*, document_type: str, collection_key: str, payload: dict[str, Any], filename_prefix: str) -> dict[str, str]:
-    records = payload.get(collection_key)
-    if not isinstance(records, list) or not records:
-        raise HTTPException(status_code=400, detail="저장할 결과가 없습니다.")
+def _register_pdf_fonts() -> tuple[str, str]:
+    regular = next((path for path in FONT_REGULAR_CANDIDATES if path.is_file()), None)
+    bold = next((path for path in FONT_BOLD_CANDIDATES if path.is_file()), regular)
+    if regular is None:
+        return "Helvetica", "Helvetica-Bold"
+    try:
+        if "MSDSRegular" not in pdfmetrics.getRegisteredFontNames():
+            pdfmetrics.registerFont(TTFont("MSDSRegular", str(regular)))
+        if bold and "MSDSBold" not in pdfmetrics.getRegisteredFontNames():
+            pdfmetrics.registerFont(TTFont("MSDSBold", str(bold)))
+        return "MSDSRegular", "MSDSBold" if bold else "MSDSRegular"
+    except TTFError:
+        return "Helvetica", "Helvetica-Bold"
 
+
+def _wrap_pdf_line(value: str, font_name: str, font_size: float, max_width: float) -> list[str]:
+    if not value:
+        return [""]
+    lines: list[str] = []
+    current = ""
+    for character in value:
+        candidate = current + character
+        if current and pdfmetrics.stringWidth(candidate, font_name, font_size) > max_width:
+            lines.append(current.rstrip())
+            current = character.lstrip()
+        else:
+            current = candidate
+    lines.append(current.rstrip())
+    return lines
+
+
+def _draw_lines(
+    pdf: canvas.Canvas,
+    values: list[str],
+    *,
+    x: float,
+    y: float,
+    width: float,
+    font_name: str,
+    font_size: float = 9,
+    line_height: float = 13,
+) -> float:
+    pdf.setFont(font_name, font_size)
+    for value in values:
+        source_lines = str(value or "").splitlines() or [""]
+        for source_line in source_lines:
+            for line in _wrap_pdf_line(source_line, font_name, font_size, width):
+                if y < 42:
+                    pdf.showPage()
+                    y = A4[1] - 42
+                    pdf.setFont(font_name, font_size)
+                pdf.drawString(x, y, line)
+                y -= line_height
+    return y
+
+
+def _draw_section(
+    pdf: canvas.Canvas,
+    title: str,
+    value: str,
+    *,
+    y: float,
+    regular_font: str,
+    bold_font: str,
+) -> float:
+    margin = 42
+    if y < 75:
+        pdf.showPage()
+        y = A4[1] - margin
+    pdf.setFont(bold_font, 11)
+    pdf.drawString(margin, y, title)
+    y -= 17
+    content = str(value or "").strip() or "입력되지 않음"
+    y = _draw_lines(
+        pdf,
+        content.splitlines(),
+        x=margin + 8,
+        y=y,
+        width=A4[0] - margin * 2 - 8,
+        font_name=regular_font,
+    )
+    return y - 10
+
+
+def _field(record: dict[str, Any], name: str) -> str:
+    fields = record.get("final_fields")
+    if isinstance(fields, dict):
+        return str(fields.get(name) or "").strip()
+    return ""
+
+
+def _pictogram_ids(record: dict[str, Any]) -> list[str]:
+    for module in record.get("modules") or []:
+        if isinstance(module, dict) and module.get("module_id") == "W-2":
+            result: list[str] = []
+            for asset in module.get("pictogram_assets") or []:
+                asset_id = str(asset.get("id") or "") if isinstance(asset, dict) else ""
+                if asset_id.isdigit() and asset_id not in result:
+                    result.append(asset_id)
+            return result
+    return []
+
+
+def _draw_warning_record(pdf: canvas.Canvas, record: dict[str, Any], regular_font: str, bold_font: str) -> None:
+    width, height = A4
+    margin = 42
+    y = height - margin
+    pdf.setTitle("MSDS 경고표지")
+    pdf.setFont(bold_font, 18)
+    pdf.drawCentredString(width / 2, y, "경고표지")
+    y -= 28
+    product = _field(record, "product_name") or Path(str(record.get("source_file") or "MSDS")).stem
+    y = _draw_lines(pdf, [product], x=margin, y=y, width=width - margin * 2, font_name=bold_font, font_size=14, line_height=19)
+    y -= 8
+
+    assets = _pictogram_ids(record)
+    if assets:
+        icon_size = 48
+        gap = 6
+        total_width = len(assets) * icon_size + max(0, len(assets) - 1) * gap
+        x = (width - total_width) / 2
+        for asset_id in assets:
+            path = pictogram_path(asset_id)
+            if path:
+                pdf.drawImage(ImageReader(str(path)), x, y - icon_size, icon_size, icon_size, preserveAspectRatio=True, mask="auto")
+            x += icon_size + gap
+        y -= icon_size + 20
+
+    signal_word = _field(record, "signal_word")
+    if signal_word:
+        pdf.setFont(bold_font, 16)
+        pdf.drawCentredString(width / 2, y, signal_word)
+        y -= 24
+    y = _draw_section(pdf, "유해·위험 문구", _field(record, "hazard_statements"), y=y, regular_font=regular_font, bold_font=bold_font)
+    y = _draw_section(pdf, "예방조치 문구", _field(record, "precautionary_statements"), y=y, regular_font=regular_font, bold_font=bold_font)
+    y = _draw_section(pdf, "공급자 정보", _field(record, "supplier_information"), y=y, regular_font=regular_font, bold_font=bold_font)
+    source = Path(str(record.get("source_file") or "MSDS.pdf")).name
+    _draw_lines(pdf, [f"원본 PDF: {source}"], x=margin, y=y, width=width - margin * 2, font_name=regular_font, font_size=8, line_height=11)
+
+
+def _draw_management_record(pdf: canvas.Canvas, record: dict[str, Any], regular_font: str, bold_font: str) -> None:
+    width, height = A4
+    margin = 42
+    y = height - margin
+    pdf.setTitle("MSDS 관리요령")
+    pdf.setFont(bold_font, 18)
+    pdf.drawCentredString(width / 2, y, "관리요령")
+    y -= 30
+    work_name = str(record.get("work_name") or "").strip()
+    y = _draw_lines(pdf, [f"작업명: {work_name}"], x=margin, y=y, width=width - margin * 2, font_name=bold_font, font_size=13, line_height=18)
+    y -= 8
+    sections = (
+        ("M-1 제품명", "product_name"),
+        ("M-2 건강 및 환경 유해성·물리적 위험성", "hazard_risk_summary"),
+        ("M-3 안전 및 보건상의 취급주의 사항", "safe_handling_precautions"),
+        ("M-4 적절한 보호구", "personal_protective_equipment"),
+        ("M-5 응급조치 요령 및 사고 시 대처방법", "emergency_response"),
+    )
+    for title, field_name in sections:
+        y = _draw_section(pdf, title, _field(record, field_name), y=y, regular_font=regular_font, bold_font=bold_font)
+    source = Path(str(record.get("source_file") or "MSDS.pdf")).name
+    _draw_lines(pdf, [f"원본 PDF: {source}"], x=margin, y=y, width=width - margin * 2, font_name=regular_font, font_size=8, line_height=11)
+
+
+def _save_pdf(*, records: list[dict[str, Any]], filename_prefix: str, renderer: Any) -> dict[str, str]:
     SAVE_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    filename = f"{filename_prefix}_{timestamp}.json"
+    filename = f"{filename_prefix}_{timestamp}.pdf"
     target = SAVE_DIR / filename
-
-    saved_payload: dict[str, Any] = {
-        "document_type": document_type,
-        "saved_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-        "record_count": len(records),
-        collection_key: records,
-    }
-    target.write_text(json.dumps(saved_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    regular_font, bold_font = _register_pdf_fonts()
+    pdf = canvas.Canvas(str(target), pagesize=A4, pageCompression=1)
+    for index, record in enumerate(records):
+        if index:
+            pdf.showPage()
+        renderer(pdf, record, regular_font, bold_font)
+    pdf.save()
     return {
-        "message": "최종 내용을 저장했습니다.",
+        "message": "최종 내용을 PDF로 저장했습니다.",
         "filename": filename,
         "download_url": f"/api/saved/{filename}",
     }
@@ -236,13 +411,13 @@ def _save_json(*, document_type: str, collection_key: str, payload: dict[str, An
 
 @app.post("/api/warning-labels/save")
 async def save_warning_labels(payload: dict[str, Any] = Body(...)) -> dict[str, str]:
-    """사용자가 수정한 최종 W-1~W-6 통합 결과를 저장한다."""
-    _validate_final_records(payload.get("labels"), expected_modules=6)
-    return _save_json(
-        document_type="warning_label",
-        collection_key="labels",
-        payload=payload,
+    """사용자가 수정한 최종 W-1~W-6 결과를 PDF로 저장한다."""
+    labels = payload.get("labels")
+    _validate_final_records(labels, expected_modules=6)
+    return _save_pdf(
+        records=labels,
         filename_prefix="warning_labels",
+        renderer=_draw_warning_record,
     )
 
 
@@ -257,11 +432,10 @@ async def save_management_guides(payload: dict[str, Any] = Body(...)) -> dict[st
             source_file = Path(str(guide.get("source_file") or f"PDF {index}")).name
             raise HTTPException(status_code=400, detail=f"{source_file}의 작업명을 입력해야 저장할 수 있습니다.")
         guide["work_name"] = work_name
-    return _save_json(
-        document_type="management_guide",
-        collection_key="guides",
-        payload=payload,
+    return _save_pdf(
+        records=guides,
         filename_prefix="management_guides",
+        renderer=_draw_management_record,
     )
 
 
@@ -280,14 +454,14 @@ def _validate_final_records(records: Any, *, expected_modules: int) -> None:
 @app.get("/api/saved/{filename}")
 async def download_saved_result(filename: str) -> FileResponse:
     safe_name = Path(filename).name
-    pattern = r"(?:warning_labels|management_guides)_\d{8}_\d{6}_\d{6}\.json"
+    pattern = r"(?:warning_labels|management_guides)_\d{8}_\d{6}_\d{6}\.pdf"
     if safe_name != filename or not re.fullmatch(pattern, safe_name):
         raise HTTPException(status_code=400, detail="잘못된 파일명입니다.")
 
     target = SAVE_DIR / safe_name
     if not target.is_file():
         raise HTTPException(status_code=404, detail="저장 파일을 찾을 수 없습니다.")
-    return FileResponse(target, media_type="application/json", filename=safe_name)
+    return FileResponse(target, media_type="application/pdf", filename=safe_name)
 
 
 # 기존 다운로드 URL과의 호환성을 유지한다.

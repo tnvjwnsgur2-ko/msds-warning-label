@@ -26,11 +26,23 @@ def pdf_bytes(text: str = "sample") -> bytes:
 
 
 def edited_record(module_prefix: str, count: int):
+    fields_by_prefix = {
+        "W": ["product_name", "pictograms", "signal_word", "hazard_statements", "precautionary_statements", "supplier_information"],
+        "M": ["product_name", "hazard_risk_summary", "safe_handling_precautions", "personal_protective_equipment", "emergency_response"],
+    }
+    fields = fields_by_prefix[module_prefix]
     modules = [
-        {"module_id": f"{module_prefix}-{index}", "label": "항목", "field": f"field_{index}", "text": "수정값"}
-        for index in range(1, count + 1)
+        {"module_id": f"{module_prefix}-{index}", "label": "항목", "field": field, "text": f"EDITED-{field}"}
+        for index, field in enumerate(fields, start=1)
     ]
+    if module_prefix == "W":
+        modules[1]["pictogram_assets"] = [{"id": "2", "label": "인화성", "url": "/api/pictograms/2"}]
     return {"source_file": "a.pdf", "modules": modules, "final_fields": {item["field"]: item["text"] for item in modules}}
+
+
+def saved_pdf_text(path):
+    with fitz.open(path) as document:
+        return "\n".join(page.get_text() for page in document), sum(len(page.get_images()) for page in document)
 
 
 def test_health_and_pictogram_asset():
@@ -51,6 +63,7 @@ def test_ui_is_not_cached_and_uses_one_work_name_input_per_management_card():
     assert page.count('data-field="work_name"') == 1
     assert 'id="workNameInput"' not in page
     assert "각 PDF 카드마다 서로 다른 작업명을 입력할 수 있습니다" in page
+    assert '>PDF 저장</button>' in page
     assert "관리요령 작업명 (파일별 필수)" in script
     assert "workNamesByFile.set(fileKey(file), workNameInput.value)" in script
     assert "app.js?v=20260805-4" in page
@@ -123,30 +136,39 @@ def test_save_uses_edited_values_and_requires_work_name(tmp_path, monkeypatch):
     monkeypatch.setattr(webapp, "SAVE_DIR", tmp_path)
     warning = call("POST", "/api/warning-labels/save", json={"labels": [edited_record("W", 6)]})
     assert warning.status_code == 200
-    saved = __import__("json").loads((tmp_path / warning.json()["filename"]).read_text(encoding="utf-8"))
-    assert saved["labels"][0]["final_fields"]["field_1"] == "수정값"
+    assert warning.json()["filename"].endswith(".pdf")
+    warning_text, image_count = saved_pdf_text(tmp_path / warning.json()["filename"])
+    assert "EDITED-product_name" in warning_text
+    assert image_count == 1
+    download = asyncio.run(webapp.download_saved_result(warning.json()["filename"]))
+    assert download.media_type == "application/pdf"
+    assert (tmp_path / warning.json()["filename"]).read_bytes().startswith(b"%PDF-")
 
     record = edited_record("M", 5)
     assert call("POST", "/api/management-guides/save", json={"guides": [record]}).status_code == 400
-    record["work_name"] = " 도장작업 "
+    record["work_name"] = " Paint task "
     valid = call("POST", "/api/management-guides/save", json={"guides": [record]})
     assert valid.status_code == 200
-    saved_management = __import__("json").loads((tmp_path / valid.json()["filename"]).read_text(encoding="utf-8"))
-    assert saved_management["guides"][0]["work_name"] == "도장작업"
+    management_text, _ = saved_pdf_text(tmp_path / valid.json()["filename"])
+    assert "Paint task" in management_text
+    assert "EDITED-emergency_response" in management_text
 
 
 def test_management_requires_a_separate_work_name_for_every_pdf(tmp_path, monkeypatch):
     monkeypatch.setattr(webapp, "SAVE_DIR", tmp_path)
     first = edited_record("M", 5)
-    first.update({"source_file": "paint.pdf", "work_name": "도장작업"})
+    first.update({"source_file": "paint.pdf", "work_name": "Paint task"})
     second = edited_record("M", 5)
     second.update({"source_file": "cleaner.pdf", "work_name": " "})
     invalid = call("POST", "/api/management-guides/save", json={"guides": [first, second]})
     assert invalid.status_code == 400
     assert "cleaner.pdf" in invalid.json()["detail"]
 
-    second["work_name"] = "세척작업"
+    second["work_name"] = "Cleaning task"
     valid = call("POST", "/api/management-guides/save", json={"guides": [first, second]})
     assert valid.status_code == 200
-    saved = __import__("json").loads((tmp_path / valid.json()["filename"]).read_text(encoding="utf-8"))
-    assert [guide["work_name"] for guide in saved["guides"]] == ["도장작업", "세척작업"]
+    text, _ = saved_pdf_text(tmp_path / valid.json()["filename"])
+    assert "Paint task" in text
+    assert "Cleaning task" in text
+    with fitz.open(tmp_path / valid.json()["filename"]) as document:
+        assert len(document) >= 2
